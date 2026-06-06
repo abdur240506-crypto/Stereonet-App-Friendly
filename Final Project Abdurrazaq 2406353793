@@ -763,11 +763,20 @@ if mode.startswith("⚡"):
         dips    = np.array([s['dip']    for s in fs])
         pitches = np.array([s.get('pitch', 0) for s in fs])
 
-        mean_pitch = float(np.mean(pitches))
-        # kalau pitch rata-rata > 0 berarti pengguna ngisi manual, pakai itu
-        # kalau 0 semua, estimasi otomatis dari dip & shear sense
-        rake = int(mean_pitch) if mean_pitch > 0 \
-               else estimate_rake(float(np.mean(dips)), shear_sense)
+        # cek apakah ADA SATUPUN pitch yang diisi (> 0)
+        # bukan rata-rata — karena kalau 5 set pitch=0 dan 1 set pitch=10,
+        # rata-ratanya tetap kecil dan salah masuk ke fallback dip
+        pitched = [s.get('pitch', 0) for s in fs if s.get('pitch', 0) > 0]
+        pitch_diisi = len(pitched) > 0
+
+        if pitch_diisi:
+            # pakai rata-rata dari pitch yang diisi aja (yang 0 di-skip)
+            mean_pitch = float(np.mean(pitched))
+            rake = int(mean_pitch)
+        else:
+            # belum ada pitch sama sekali, estimasi dari dip + shear sense
+            mean_pitch = 0.0
+            rake = estimate_rake(float(np.mean(dips)), shear_sense)
 
         tab1, tab2, tab3, tab4 = st.tabs([
             "Stereonet", "Rose Diagram", "Stress Axes", "Beachball"
@@ -805,12 +814,15 @@ if mode.startswith("⚡"):
 
     # klasifikasi sesar — pakai rake kalau pitch sudah diisi, fallback dip kalau belum
     # tanda * di hasil berarti estimasi dari dip, bukan rake → kurang akurat
-    if mean_pitch > 0:
+    # pitch_diisi didefinisikan di col_plot di atas, masih valid di scope yang sama
+    if pitch_diisi:
         fault_type = classify_fault_by_rake(rake)
         rake_source = "dari pitch manual"
     else:
+        # fallback: klasifikasi dari dip — bisa salah untuk strike-slip dip curam
+        # contoh: dip 85 + rake 10 = strike-slip, tapi dip doang kelihatan normal fault
         fault_type = classify_fault_by_dip(list(dips))
-        rake_source = "estimasi dari dip (isi pitch untuk hasil akurat)"
+        rake_source = "estimasi dari dip — isi Pitch untuk hasil akurat"
 
     sigma1 = (mean_angle(list(strikes)) + 90) % 360
     sigma3 = (sigma1 + 180) % 360
@@ -849,9 +861,10 @@ if mode.startswith("⚡"):
               <div class="metric-value">%s</div>
             </div>""" % (lbl, val), unsafe_allow_html=True)
 
-    # warning kalau klasifikasi masih dari dip
-    if mean_pitch == 0:
-        st.warning("⚠️ Pitch belum diisi — klasifikasi sesar pakai estimasi dari dip. Isi kolom Pitch untuk hasil yang akurat.", icon="⚠️")
+    # warning kalau pitch belum diisi — kasih tau user supaya hasilnya akurat
+    # contoh kasus: dip 85° tanpa pitch → diklasifikasikan normal fault, padahal bisa strike-slip
+    if not pitch_diisi:
+        st.warning("⚠️ Kolom Pitch belum diisi — klasifikasi pakai estimasi dari dip dan bisa salah. Isi Pitch (rake) di input untuk hasil yang benar.", icon="⚠️")
 
     st.markdown("""
     <div class="info-box">
